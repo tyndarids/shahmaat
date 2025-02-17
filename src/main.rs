@@ -33,7 +33,10 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
                 eprintln!("Shahmaat protocol version mismatch");
-                eprintln!("Client protocols: {protocols:?}");
+                eprintln!(
+                    "Client protocols: {:?}",
+                    protocols.iter().collect::<Vec<_>>(),
+                );
                 eprintln!("Server protocols: {PROTOCOL_VERSION:?}");
                 Ok(resp)
             },
@@ -58,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
                 Message::Frame(_) => unreachable!(),
             }
         }
+        eprint!("\nWaiting for connection... ");
     }
 
     Ok(())

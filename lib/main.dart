@@ -26,27 +26,95 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  WebSocketChannel _establishConnection() => WebSocketChannel.connect(
+    Uri.parse("ws://localhost:8080"),
+    protocols: ["shahmaat_protocol_$protocolVersion"],
+  );
+
+  late var _channel = _establishConnection();
+
+  @override
+  void dispose() async {
+    await _channel.sink.close();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-      title: Text("Shahmaat test"),
+      title: Text("Shahmaat Server Ping"),
     ),
     body: Center(
-      child: OutlinedButton.icon(
-        icon: Icon(Icons.start),
-        label: Text("Connect to server"),
+      child: StreamBuilder(
+        stream: _channel.stream,
+        builder: (context, snapshot) {
+          if (snapshot.hasData && snapshot.data.runtimeType == String) {
+            debugPrint("Data contents: ${snapshot.data}");
+          }
 
-        onPressed: () async {
-          final channel = WebSocketChannel.connect(
-            Uri.parse("wss://localhost:8080"),
-            protocols: ["shahmaat_protocol_$protocolVersion"],
-          );
-          debugPrint("Sent message");
-          channel.sink.add("Hello from Flutter!");
-          final String message = await channel.stream.first;
-          debugPrint("Received: $message");
-          channel.sink.close();
+          if (snapshot.connectionState == ConnectionState.done) {
+            debugPrint(snapshot.error.toString());
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.close, size: 78, color: Colors.red),
+                    Text(
+                      "Connection closed",
+                      style: Theme.of(context).textTheme.displayMedium,
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: FilledButton.icon(
+                    icon: Icon(Icons.refresh, size: 30),
+                    label: Text("Retry", style: TextStyle(fontSize: 30)),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(220, 80),
+                    ),
+                    onPressed: () async {
+                      await _channel.sink.close();
+                      setState(() => _channel = _establishConnection());
+                    },
+                  ),
+                ),
+              ],
+            );
+          } else if (snapshot.connectionState != ConnectionState.none) {
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: FloatingActionButton.extended(
+                    icon: Icon(Icons.cable),
+                    label: Text("Ping server"),
+                    onPressed: () async {
+                      _channel.sink.add("Hello from Flutter!");
+                      debugPrint("Sent message");
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: OutlinedButton.icon(
+                    icon: Icon(Icons.close),
+                    label: Text("Close connection"),
+                    onPressed: () async {
+                      await _channel.sink.close();
+                      setState(() {});
+                    },
+                  ),
+                ),
+              ],
+            );
+          } else {
+            return Container();
+          }
         },
       ),
     ),
