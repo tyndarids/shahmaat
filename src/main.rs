@@ -53,14 +53,12 @@ async fn main() -> anyhow::Result<()> {
                     tx.send(Message::Text("Hello from Rust!".into())).await?;
                     println!("Sent message");
                 }
-                Message::Binary(bytes) => todo!(),
-                Message::Ping(bytes) => todo!(),
-                Message::Pong(bytes) => todo!(),
-
                 Message::Close(_) => break,
                 Message::Frame(_) => unreachable!(),
+                _ => eprintln!("Unexpected message: {message}"),
             }
         }
+
         eprint!("\nWaiting for connection... ");
     }
 

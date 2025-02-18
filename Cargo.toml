@@ -1,5 +1,6 @@
 [package]
 name = "shahmaat"
+description = "Online multiplayer chess game"
 version = "0.1.0"
 edition = "2024"
 
