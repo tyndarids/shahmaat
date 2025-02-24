@@ -54,7 +54,6 @@ class _MyHomePageState extends State<MyHomePage> {
           }
 
           if (snapshot.connectionState == ConnectionState.done) {
-            debugPrint(snapshot.error.toString());
             return Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
