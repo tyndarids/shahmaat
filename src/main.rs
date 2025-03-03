@@ -1,12 +1,23 @@
-use futures_util::{FutureExt, SinkExt as _, stream::StreamExt as _};
+#![warn(clippy::use_self)]
+
+mod board;
+mod board_pos;
+mod piece;
+mod protocol;
+
+use board::BoardState;
+use futures_util::{SinkExt as _, stream::StreamExt as _};
 use http::header::SEC_WEBSOCKET_PROTOCOL;
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
+use protocol::{ClientMessage, ServerMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
+    select,
     sync::{Semaphore, SemaphorePermit, TryAcquireError},
     task::JoinSet,
 };
 use tokio_tungstenite::tungstenite::{
+    self,
     handshake::client::Request,
     http::{HeaderValue, Response},
 };
@@ -20,28 +31,29 @@ async fn main() -> anyhow::Result<()> {
 
     let socket = TcpListener::bind("localhost:8080").await?;
     let mut tasks = JoinSet::new();
-    let intr_handler = tokio::spawn(tokio::signal::ctrl_c());
 
     info!("Listening for connections");
     loop {
-        if intr_handler.is_finished() {
-            eprint!("\r"); // clear the ^C in the terminal
-            info!("Gracefully quitting");
-            intr_handler.await??;
-            tasks.abort_all();
-            return Ok(());
-        }
+        select! {
+            Ok(()) = tokio::signal::ctrl_c() => {
+                eprint!("\r"); // clear the ^C in the terminal
+                info!("Gracefully quitting");
+                tasks.abort_all();
+                return Ok(());
 
-        if let Some(Ok((raw_stream, addr))) = socket.accept().now_or_never() {
-            info!("Connection requested from {addr}");
-            match SEMAPHORE.try_acquire() {
-                Ok(permit) => {
-                    tasks.spawn(handle_connection(permit, raw_stream));
+            }
+            Ok((raw_stream, addr)) = socket.accept() => {
+                info!("Connection requested from {addr}");
+                match SEMAPHORE.try_acquire() {
+                    Ok(permit) => {
+                        tasks.spawn(handle_connection(permit, raw_stream));
+                    }
+                    Err(TryAcquireError::NoPermits) => {
+                        error!("Server reached its maximum number of simultaneous connections")
+                    }
+                    Err(err) => error!("Error: {err}"),
                 }
-                Err(TryAcquireError::NoPermits) => {
-                    error!("Server reached its maximum number of simultaneous connections")
-                }
-                Err(err) => error!("Error: {err}"),
+
             }
         }
     }
@@ -79,17 +91,35 @@ async fn handle_connection(
     .await?;
     let (mut tx, mut rx) = stream.split();
 
+    let board = BoardState::default();
+    info!("\n{}", board);
+
     while let Some(message) = rx.next().await {
         let message = message?;
-        use tokio_tungstenite::tungstenite::Message;
         match message {
-            Message::Text(text) => {
-                debug!("Received: {text}");
-                tx.send(Message::Text("Hello from Rust!".into())).await?;
-                debug!("Sent message");
+            tungstenite::Message::Text(text) => {
+                let Ok(message) = serde_json::from_str::<ClientMessage>(text.as_ref()) else {
+                    tx.send(tungstenite::Message::Text(
+                        serde_json::to_string(&ServerMessage::Error(
+                            "Could not decode message".to_owned(),
+                        ))?
+                        .into(),
+                    ))
+                    .await?;
+                    continue;
+                };
+                match &message {
+                    ClientMessage::Picked { pos } => {
+                        if let Some(piece) = board[*pos] {
+                            todo!();
+                        }
+                    }
+                    ClientMessage::Placed { pos } => todo!(),
+                    ClientMessage::Error(err) => error!("{:?}", message),
+                }
             }
-            Message::Close(_) => break,
-            Message::Frame(_) => unreachable!(),
+            tungstenite::Message::Close(_) => break,
+            tungstenite::Message::Frame(_) => unreachable!(),
             _ => warn!("Unexpected message: {message}"),
         }
     }
