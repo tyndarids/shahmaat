@@ -56,10 +56,9 @@ async fn main() -> anyhow::Result<()> {
         select! {
             Ok(()) = tokio::signal::ctrl_c() => {
                 eprint!("\r"); // clear the ^C in the terminal
-                info!("Gracefully quitting");
-                tasks.abort_all();
+                info!("Shutting down {} tasks", tasks.len());
+                tasks.shutdown().await;
                 return Ok(());
-
             }
             Ok((raw_stream, addr)) = socket.accept() => {
                 info!("Connection requested from {addr}");
@@ -113,7 +112,7 @@ async fn handle_connection(
     let mut board = BoardState::default();
     let mut picked_piece_pos = None;
     info!("\n{}", board);
-    send!(tx, Start { board });
+    send!(tx, Start(board));
 
     while let Some(message) = rx.next().await {
         let message = message?;
@@ -121,26 +120,22 @@ async fn handle_connection(
             Message::Text(text) => {
                 let Ok(message) = serde_json::from_str::<ClientMessage>(text.as_ref()) else {
                     send!(tx, Error("Could not decode message"));
-                    error!("Received \"{text}\"");
+                    error!("Received `{text}`");
                     continue;
                 };
                 match &message {
-                    ClientMessage::Picked { pos } => {
-                        if let Some(piece) = board[*pos] {
-                            picked_piece_pos = Some(*pos);
-                            let valid_moves = piece.valid_moves(board);
-                            send!(tx, ValidMoves(valid_moves));
-                        }
+                    ClientMessage::Picked(pos) => {
+                        picked_piece_pos = Some(*pos);
+                        let valid_moves = board.valid_moves(*pos);
+                        send!(tx, ValidMoves(valid_moves));
                     }
 
-                    ClientMessage::Placed { pos } => {
+                    ClientMessage::Placed(pos) => {
                         if let Some(from) = picked_piece_pos {
-                            if let Some(picked_piece) = board[from] {
-                                let valid_moves = picked_piece.valid_moves(board);
-                                if valid_moves.contains(pos) {
-                                    board[*pos] = take(&mut board[from]);
-                                    send!(tx, Place { at: *pos });
-                                }
+                            let valid_moves = board.valid_moves(*pos);
+                            if &from == pos || valid_moves.contains(pos) {
+                                board[*pos] = take(&mut board[from]);
+                                send!(tx, Place(*pos));
                             }
                         } else {
                             send!(tx, Error("Trying to place without picking a piece"));
@@ -150,12 +145,14 @@ async fn handle_connection(
                     ClientMessage::Error(_) => error!("{:?}", message),
                 }
             }
-            Message::Close(_) => break,
+            Message::Close(_) => {
+                info!("Client disconnected");
+                break;
+            }
             Message::Frame(_) => unreachable!(),
             _ => warn!("Unexpected message: {message}"),
         }
     }
 
-    info!("Connection gracefully terminated");
     Ok(())
 }

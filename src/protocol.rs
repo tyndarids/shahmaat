@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum ServerMessage {
-    Start { board: BoardState },
+    Start(BoardState),
 
     ValidMoves(Vec<BoardPos>),
-    Place { at: BoardPos },
+    Place(BoardPos),
 
     GameEnd(bool),
 
@@ -15,8 +15,8 @@ pub enum ServerMessage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub enum ClientMessage {
-    Picked { pos: BoardPos },
-    Placed { pos: BoardPos },
+    Picked(BoardPos),
+    Placed(BoardPos),
 
     Error(String),
 }

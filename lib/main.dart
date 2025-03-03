@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-const protocolVersion = "0.1.1";
+import 'playfield.dart';
 
-void main() => runApp(const MyApp());
+const protocolVersion = "0.1.0";
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+void main() => runApp(const Shahmaat());
+
+class Shahmaat extends StatelessWidget {
+  const Shahmaat({super.key});
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Shahmaat',
+    title: "Shahmaat",
     theme: ThemeData(
       colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
     ),
@@ -26,16 +28,16 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  WebSocketChannel _establishConnection() => WebSocketChannel.connect(
+  static WebSocketChannel _establishConnection() => WebSocketChannel.connect(
     Uri.parse("ws://localhost:8080"),
     protocols: ["shahmaat_protocol_$protocolVersion"],
   );
 
-  late var _channel = _establishConnection();
+  WebSocketChannel? _channel = _establishConnection();
 
   @override
   void dispose() async {
-    await _channel.sink.close();
+    _channel?.sink.close();
     super.dispose();
   }
 
@@ -43,76 +45,74 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-      title: Text("Shahmaat Server Ping"),
+      title: Text("Shahmaat"),
     ),
     body: Center(
-      child: StreamBuilder(
-        stream: _channel.stream,
+      child: FutureBuilder(
+        future: _channel?.ready,
         builder: (context, snapshot) {
-          if (snapshot.hasData && snapshot.data.runtimeType == String) {
-            debugPrint("Data contents: ${snapshot.data}");
-          }
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return CircularProgressIndicator();
+          } else if (snapshot.connectionState == ConnectionState.done) {
+            if (snapshot.hasError) throw snapshot.error!;
 
-          if (snapshot.connectionState == ConnectionState.done) {
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+            return Stack(
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.close, size: 78, color: Colors.red),
-                    Text(
-                      "Connection closed",
-                      style: Theme.of(context).textTheme.displayMedium,
-                    ),
-                  ],
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: FilledButton.icon(
-                    icon: Icon(Icons.refresh, size: 30),
-                    label: Text("Retry", style: TextStyle(fontSize: 30)),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(220, 80),
-                    ),
-                    onPressed: () async {
-                      await _channel.sink.close();
-                      setState(() => _channel = _establishConnection());
-                    },
-                  ),
-                ),
-              ],
-            );
-          } else if (snapshot.connectionState != ConnectionState.none) {
-            return Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: FloatingActionButton.extended(
-                    icon: Icon(Icons.cable),
-                    label: Text("Ping server"),
-                    onPressed: () async {
-                      _channel.sink.add("Hello from Flutter!");
-                      debugPrint("Sent message");
-                    },
-                  ),
-                ),
+                Playfield(channel: _channel!),
                 Padding(
                   padding: const EdgeInsets.all(8),
                   child: OutlinedButton.icon(
                     icon: Icon(Icons.close),
                     label: Text("Close connection"),
                     onPressed: () async {
-                      await _channel.sink.close();
-                      setState(() {});
+                      _channel?.sink.close();
+                      setState(() => _channel = null);
                     },
                   ),
                 ),
               ],
             );
           } else {
-            return Container();
+            return Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Icon(Icons.power_off, size: 48),
+                    ),
+                    Text(
+                      "Disconnected",
+                      style: Theme.of(context).textTheme.displayMedium,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Icon(
+                        Icons.power_off,
+                        size: 48,
+                        color: Color(0x00000000),
+                      ),
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: FilledButton.icon(
+                    icon: Icon(Icons.power, size: 30),
+                    label: Text("Connect", style: TextStyle(fontSize: 30)),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(200, 80),
+                    ),
+                    onPressed: () async {
+                      _channel?.sink.close();
+                      setState(() => _channel = _establishConnection());
+                    },
+                  ),
+                ),
+              ],
+            );
           }
         },
       ),

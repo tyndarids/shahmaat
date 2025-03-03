@@ -43,8 +43,8 @@ impl Default for BoardState {
 impl std::fmt::Display for BoardState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "  ╭────────────────────────╮")?;
-        for (x, row) in self.0.iter().enumerate().rev() {
-            write!(f, "{} │", x + 1)?;
+        for (y, row) in self.0.iter().enumerate().rev() {
+            write!(f, "{} │", y + 1)?;
             for piece in row {
                 if let Some(piece) = piece {
                     write!(f, " {piece} ")?;
