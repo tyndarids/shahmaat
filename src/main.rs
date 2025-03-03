@@ -4,12 +4,14 @@ mod board;
 mod board_pos;
 mod piece;
 mod protocol;
+mod valid_moves;
 
 use board::BoardState;
 use futures_util::{SinkExt as _, stream::StreamExt as _};
 use http::header::SEC_WEBSOCKET_PROTOCOL;
 use log::{error, info, warn};
-use protocol::{ClientMessage, ServerMessage};
+use protocol::ClientMessage;
+use std::mem::take;
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
@@ -17,13 +19,30 @@ use tokio::{
     task::JoinSet,
 };
 use tokio_tungstenite::tungstenite::{
-    self,
     handshake::client::Request,
     http::{HeaderValue, Response},
 };
 
 const PROTOCOL_VERSION: &str = "shahmaat_protocol_0.1.0";
 static SEMAPHORE: Semaphore = Semaphore::const_new(1);
+
+macro_rules! send {
+    ($tx:expr, $variant:expr) => {
+        use protocol::ServerMessage::*;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let message = $variant;
+
+        if let Error(err) = &message {
+            error!("Error: {err}");
+        } else {
+            info!("Sending {:?}", &message);
+        }
+
+        $tx.send(Message::Text(serde_json::to_string(&message)?.into()))
+            .await?;
+    };
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -91,35 +110,48 @@ async fn handle_connection(
     .await?;
     let (mut tx, mut rx) = stream.split();
 
-    let board = BoardState::default();
+    let mut board = BoardState::default();
+    let mut picked_piece_pos = None;
     info!("\n{}", board);
+    send!(tx, Start { board });
 
     while let Some(message) = rx.next().await {
         let message = message?;
         match message {
-            tungstenite::Message::Text(text) => {
+            Message::Text(text) => {
                 let Ok(message) = serde_json::from_str::<ClientMessage>(text.as_ref()) else {
-                    tx.send(tungstenite::Message::Text(
-                        serde_json::to_string(&ServerMessage::Error(
-                            "Could not decode message".to_owned(),
-                        ))?
-                        .into(),
-                    ))
-                    .await?;
+                    send!(tx, Error("Could not decode message"));
+                    error!("Received \"{text}\"");
                     continue;
                 };
                 match &message {
                     ClientMessage::Picked { pos } => {
                         if let Some(piece) = board[*pos] {
-                            todo!();
+                            picked_piece_pos = Some(*pos);
+                            let valid_moves = piece.valid_moves(board);
+                            send!(tx, ValidMoves(valid_moves));
                         }
                     }
-                    ClientMessage::Placed { pos } => todo!(),
-                    ClientMessage::Error(err) => error!("{:?}", message),
+
+                    ClientMessage::Placed { pos } => {
+                        if let Some(from) = picked_piece_pos {
+                            if let Some(picked_piece) = board[from] {
+                                let valid_moves = picked_piece.valid_moves(board);
+                                if valid_moves.contains(pos) {
+                                    board[*pos] = take(&mut board[from]);
+                                    send!(tx, Place { at: *pos });
+                                }
+                            }
+                        } else {
+                            send!(tx, Error("Trying to place without picking a piece"));
+                        }
+                    }
+
+                    ClientMessage::Error(_) => error!("{:?}", message),
                 }
             }
-            tungstenite::Message::Close(_) => break,
-            tungstenite::Message::Frame(_) => unreachable!(),
+            Message::Close(_) => break,
+            Message::Frame(_) => unreachable!(),
             _ => warn!("Unexpected message: {message}"),
         }
     }

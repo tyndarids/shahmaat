@@ -1,19 +1,19 @@
 use crate::{board::BoardState, board_pos::BoardPos};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum ServerMessage {
     Start { board: BoardState },
 
-    ValidPositions(Vec<BoardPos>),
-    Move { to: BoardPos },
+    ValidMoves(Vec<BoardPos>),
+    Place { at: BoardPos },
 
     GameEnd(bool),
 
-    Error(String),
+    Error(&'static str),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub enum ClientMessage {
     Picked { pos: BoardPos },
     Placed { pos: BoardPos },
