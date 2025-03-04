@@ -57,6 +57,8 @@ class _PlayfieldState extends State<Playfield> {
         }
       }
 
+      if (_picked == null) _validMoves = null;
+
       return _board != null
           ? Center(
             child: Padding(

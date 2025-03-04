@@ -9,22 +9,23 @@ mod valid_moves;
 use board::BoardState;
 use futures_util::{SinkExt as _, stream::StreamExt as _};
 use http::header::SEC_WEBSOCKET_PROTOCOL;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use protocol::ClientMessage;
-use std::mem::take;
+use std::{mem::take, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
     select,
-    sync::{Semaphore, SemaphorePermit, TryAcquireError},
+    sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError},
     task::JoinSet,
+    time::interval,
 };
 use tokio_tungstenite::tungstenite::{
+    Bytes,
     handshake::client::Request,
     http::{HeaderValue, Response},
 };
 
 const PROTOCOL_VERSION: &str = "shahmaat_protocol_0.1.0";
-static SEMAPHORE: Semaphore = Semaphore::const_new(1);
 
 macro_rules! send {
     ($tx:expr, $variant:expr) => {
@@ -50,10 +51,14 @@ async fn main() -> anyhow::Result<()> {
 
     let socket = TcpListener::bind("localhost:8080").await?;
     let mut tasks = JoinSet::new();
+    let semaphore = Arc::new(Semaphore::new(1));
 
     info!("Listening for connections");
     loop {
         select! {
+            Some(task) = tasks.join_next() => if let Err(err) = task? {
+                error!("Task errored out: {:?}", err);
+            },
             Ok(()) = tokio::signal::ctrl_c() => {
                 eprint!("\r"); // clear the ^C in the terminal
                 info!("Shutting down {} tasks", tasks.len());
@@ -62,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
             }
             Ok((raw_stream, addr)) = socket.accept() => {
                 info!("Connection requested from {addr}");
-                match SEMAPHORE.try_acquire() {
+                match Arc::clone(&semaphore).try_acquire_owned() {
                     Ok(permit) => {
                         tasks.spawn(handle_connection(permit, raw_stream));
                     }
@@ -71,14 +76,13 @@ async fn main() -> anyhow::Result<()> {
                     }
                     Err(err) => error!("Error: {err}"),
                 }
-
             }
         }
     }
 }
 
 async fn handle_connection(
-    _permit: SemaphorePermit<'_>,
+    _permit: OwnedSemaphorePermit,
     raw_stream: TcpStream,
 ) -> anyhow::Result<()> {
     let stream = tokio_tungstenite::accept_hdr_async(
@@ -109,48 +113,64 @@ async fn handle_connection(
     .await?;
     let (mut tx, mut rx) = stream.split();
 
+    let mut heartbeat_timer = interval(Duration::from_secs(10));
+    let mut pings = 0;
+    let mut pongs = 0;
     let mut board = BoardState::default();
     let mut picked_piece_pos = None;
-    info!("\n{}", board);
+
     send!(tx, Start(board));
 
-    while let Some(message) = rx.next().await {
-        let message = message?;
-        match message {
-            Message::Text(text) => {
-                let Ok(message) = serde_json::from_str::<ClientMessage>(text.as_ref()) else {
-                    send!(tx, Error("Could not decode message"));
-                    error!("Received `{text}`");
-                    continue;
-                };
-                match &message {
-                    ClientMessage::Picked(pos) => {
-                        picked_piece_pos = Some(*pos);
-                        let valid_moves = board.valid_moves(*pos);
-                        send!(tx, ValidMoves(valid_moves));
-                    }
+    loop {
+        select! {
+            _ = heartbeat_timer.tick() => {
+                debug!("Heartbeat status: pings - {pings}, pongs - {pongs}");
+                pings += 1;
+                tx.send(Message::Ping(Bytes::new())).await?;
+            },
 
-                    ClientMessage::Placed(pos) => {
-                        if let Some(from) = picked_piece_pos {
-                            let valid_moves = board.valid_moves(*pos);
-                            if &from == pos || valid_moves.contains(pos) {
-                                board[*pos] = take(&mut board[from]);
-                                send!(tx, Place(*pos));
+            Some(message) = rx.next() => {
+                let message = message?;
+
+                match message {
+                    Message::Text(text) => {
+                        let Ok(message) = serde_json::from_str::<ClientMessage>(text.as_ref()) else {
+                            send!(tx, Error("Could not decode message"));
+                            error!("Received `{text}`");
+                            continue;
+                        };
+                        match &message {
+                            ClientMessage::Picked(pos) => {
+                                picked_piece_pos = Some(*pos);
+                                let valid_moves = board.valid_moves(*pos);
+                                send!(tx, ValidMoves(valid_moves));
                             }
-                        } else {
-                            send!(tx, Error("Trying to place without picking a piece"));
+
+                            ClientMessage::Placed(pos) => {
+                                if let Some(from) = picked_piece_pos {
+                                    let valid_moves = board.valid_moves(*pos);
+                                    if &from == pos || valid_moves.contains(pos) {
+                                        board[*pos] = take(&mut board[from]);
+                                        send!(tx, Place(*pos));
+                                    }
+                                } else {
+                                    send!(tx, Error("Trying to place without picking a piece"));
+                                }
+                            }
+
+                            ClientMessage::Error(_) => error!("{:?}", message),
                         }
                     }
-
-                    ClientMessage::Error(_) => error!("{:?}", message),
+                    Message::Close(_) => {
+                        info!("Client disconnected");
+                        break;
+                    }
+                    Message::Frame(_) => unreachable!(),
+                    Message::Binary(_) => warn!("Unexpected binary message: {message:?}"),
+                    Message::Pong(_) => pongs += 1,
+                    Message::Ping(_) => tx.send(Message::Pong(Bytes::new())).await?,
                 }
             }
-            Message::Close(_) => {
-                info!("Client disconnected");
-                break;
-            }
-            Message::Frame(_) => unreachable!(),
-            _ => warn!("Unexpected message: {message}"),
         }
     }
 

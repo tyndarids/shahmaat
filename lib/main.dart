@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'playfield.dart';
@@ -28,9 +29,10 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  static WebSocketChannel _establishConnection() => WebSocketChannel.connect(
+  static WebSocketChannel _establishConnection() => IOWebSocketChannel.connect(
     Uri.parse("ws://localhost:8080"),
     protocols: ["shahmaat_protocol_$protocolVersion"],
+    pingInterval: Duration(seconds: 10),
   );
 
   WebSocketChannel? _channel = _establishConnection();
@@ -54,24 +56,40 @@ class _MyHomePageState extends State<MyHomePage> {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return CircularProgressIndicator();
           } else if (snapshot.connectionState == ConnectionState.done) {
-            if (snapshot.hasError) throw snapshot.error!;
-
-            return Stack(
-              children: [
-                Playfield(channel: _channel!),
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: OutlinedButton.icon(
-                    icon: Icon(Icons.close),
-                    label: Text("Close connection"),
-                    onPressed: () async {
-                      _channel?.sink.close();
-                      setState(() => _channel = null);
-                    },
-                  ),
-                ),
-              ],
-            );
+            return snapshot.hasError
+                ? Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text("Error: ${snapshot.error}"),
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: FilledButton.icon(
+                        icon: Icon(Icons.replay),
+                        label: Text("Try again"),
+                        onPressed: () async {
+                          _channel?.sink.close();
+                          setState(() => _channel = _establishConnection());
+                        },
+                      ),
+                    ),
+                  ],
+                )
+                : Stack(
+                  children: [
+                    Playfield(channel: _channel!),
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: OutlinedButton.icon(
+                        icon: Icon(Icons.close),
+                        label: Text("Close connection"),
+                        onPressed: () async {
+                          await _channel?.sink.close();
+                          setState(() => _channel = null);
+                        },
+                      ),
+                    ),
+                  ],
+                );
           } else {
             return Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -80,35 +98,22 @@ class _MyHomePageState extends State<MyHomePage> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Icon(Icons.power_off, size: 48),
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(Icons.power_off),
                     ),
                     Text(
                       "Disconnected",
-                      style: Theme.of(context).textTheme.displayMedium,
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Icon(
-                        Icons.power_off,
-                        size: 48,
-                        color: Color(0x00000000),
-                      ),
+                      style: Theme.of(context).textTheme.labelLarge,
                     ),
                   ],
                 ),
                 Padding(
-                  padding: const EdgeInsets.all(18),
+                  padding: const EdgeInsets.all(8),
                   child: FilledButton.icon(
-                    icon: Icon(Icons.power, size: 30),
-                    label: Text("Connect", style: TextStyle(fontSize: 30)),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(200, 80),
-                    ),
-                    onPressed: () async {
-                      _channel?.sink.close();
-                      setState(() => _channel = _establishConnection());
-                    },
+                    icon: Icon(Icons.power),
+                    label: Text("Connect"),
+                    onPressed:
+                        () => setState(() => _channel = _establishConnection()),
                   ),
                 ),
               ],
