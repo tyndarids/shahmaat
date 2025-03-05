@@ -11,6 +11,8 @@ dependencies:
   flutter:
     sdk: flutter
 
+  google_fonts: ^6.2.1
+  package_info_plus: ^8.3.0
   web_socket_channel: ^3.0.2
 
 dev_dependencies:
