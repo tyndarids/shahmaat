@@ -6,7 +6,7 @@ pub enum ServerMessage {
     Start(BoardState),
 
     ValidMoves(Vec<BoardPos>),
-    Place(BoardPos),
+    Place(BoardPos, BoardPos),
 
     GameEnd(bool),
 

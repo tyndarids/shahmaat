@@ -65,13 +65,13 @@ impl<T: Into<(usize, usize)>> std::ops::Index<T> for BoardState {
 
     fn index(&self, index: T) -> &Self::Output {
         let (x, y) = index.into();
-        &self.0[x][y]
+        &self.0[y][x]
     }
 }
 
 impl<T: Into<(usize, usize)>> std::ops::IndexMut<T> for BoardState {
     fn index_mut(&mut self, index: T) -> &mut Self::Output {
         let (x, y) = index.into();
-        &mut self.0[x][y]
+        &mut self.0[y][x]
     }
 }

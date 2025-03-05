@@ -124,14 +124,16 @@ async fn handle_connection(
     loop {
         select! {
             _ = heartbeat_timer.tick() => {
-                debug!("Heartbeat status: pings - {pings}, pongs - {pongs}");
-                pings += 1;
+                if pings != pongs {
+                    error!("Client not responding to pings");
+                    break;
+                }
                 tx.send(Message::Ping(Bytes::new())).await?;
+                pings += 1;
             },
 
             Some(message) = rx.next() => {
                 let message = message?;
-
                 match message {
                     Message::Text(text) => {
                         let Ok(message) = serde_json::from_str::<ClientMessage>(text.as_ref()) else {
@@ -139,19 +141,31 @@ async fn handle_connection(
                             error!("Received `{text}`");
                             continue;
                         };
+
                         match &message {
                             ClientMessage::Picked(pos) => {
-                                picked_piece_pos = Some(*pos);
-                                let valid_moves = board.valid_moves(*pos);
-                                send!(tx, ValidMoves(valid_moves));
+                                if let Some(piece) = board[*pos] {
+                                    debug!("Picked up {piece:?} at {pos:?}");
+                                    picked_piece_pos = Some(*pos);
+                                    send!(tx, ValidMoves(board.valid_moves(*pos)));
+                                } else {
+                                    send!(tx, Error("No piece at picked location"));
+                                }
                             }
 
                             ClientMessage::Placed(pos) => {
                                 if let Some(from) = picked_piece_pos {
-                                    let valid_moves = board.valid_moves(*pos);
+                                    let valid_moves = board.valid_moves(from);
                                     if &from == pos || valid_moves.contains(pos) {
-                                        board[*pos] = take(&mut board[from]);
-                                        send!(tx, Place(*pos));
+                                        debug!("Moving from {from:?} to {pos:?}");
+                                        if let Some(piece) = take(&mut board[from]) {
+                                            board[*pos] = Some(piece);
+                                            send!(tx, Place(from, *pos));
+                                        } else {
+                                            send!(tx, Error("No piece found at picked location"));
+                                        }
+                                    } else {
+                                        send!(tx, Error("Placing in an invalid location"));
                                     }
                                 } else {
                                     send!(tx, Error("Trying to place without picking a piece"));
@@ -160,15 +174,25 @@ async fn handle_connection(
 
                             ClientMessage::Error(_) => error!("{:?}", message),
                         }
+                        debug!("\n{board}");
                     }
+
                     Message::Close(_) => {
                         info!("Client disconnected");
                         break;
                     }
-                    Message::Frame(_) => unreachable!(),
+
+                    Message::Pong(_) => {
+                        pongs += 1;
+                        debug!("Heartbeat {pings} - {pongs}");
+                    }
+                    Message::Ping(_) => {
+                        debug!("Client pinged, sending pong");
+                        tx.send(Message::Pong(Bytes::new())).await?;
+                    }
+
                     Message::Binary(_) => warn!("Unexpected binary message: {message:?}"),
-                    Message::Pong(_) => pongs += 1,
-                    Message::Ping(_) => tx.send(Message::Pong(Bytes::new())).await?,
+                    Message::Frame(_) => unreachable!(),
                 }
             }
         }

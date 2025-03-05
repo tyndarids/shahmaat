@@ -5,8 +5,8 @@ impl BoardState {
         // TODO
         let mut valid_moves = vec![];
 
-        for (x, row) in self.0.iter().enumerate() {
-            for (y, piece) in row.iter().enumerate() {
+        for (y, row) in self.0.iter().enumerate() {
+            for (x, piece) in row.iter().enumerate() {
                 if piece.is_none() {
                     valid_moves.push(BoardPos::try_from((x, y)).unwrap());
                 }
