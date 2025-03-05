@@ -8,11 +8,11 @@ sealed class ServerMessage {
     assert(json.keys.length == 1);
 
     return switch (json.keys.first) {
-      "Start" => Start.fromJson(json),
-      "ValidMoves" => ValidMoves.fromJson(json),
-      "Place" => Place.fromJson(json),
-      "GameEnd" => GameEnd.fromJson(json),
-      "Error" => ServerError.fromJson(json),
+      "Start" => Start.fromJson(json["Start"]),
+      "ValidMoves" => ValidMoves.fromJson(json["ValidMoves"]),
+      "Place" => Place.fromJson(json["Place"]),
+      "GameEnd" => GameEnd.fromJson(json["GameEnd"]),
+      "Error" => ServerError.fromJson(json["Error"]),
 
       _ => throw "Unexpected JSON data from server",
     };
@@ -22,38 +22,35 @@ sealed class ServerMessage {
 final class Start extends ServerMessage {
   final BoardState board;
 
-  Start.fromJson(Map<String, dynamic> json)
-    : board = BoardState.fromJson(json["Start"]);
+  Start.fromJson(List json) : board = BoardState.fromJson(json);
 }
 
 final class ValidMoves extends ServerMessage {
-  late final List<BoardPos> validMoves;
+  final List<BoardPos> validMoves;
 
-  ValidMoves.fromJson(Map<String, dynamic> json) {
-    validMoves =
-        (json["ValidMoves"] as List<dynamic>)
-            .map<BoardPos>((pos) => BoardPos.fromJson(pos as List))
-            .toList();
-  }
+  ValidMoves.fromJson(List json)
+    : validMoves = json.map<BoardPos>((pos) => BoardPos.fromJson(pos)).toList();
 }
 
 final class Place extends ServerMessage {
-  final BoardPos at;
+  final BoardPos from;
+  final BoardPos to;
 
-  Place.fromJson(Map<String, dynamic> json)
-    : at = BoardPos.fromJson(json["Place"]);
+  Place.fromJson(List json)
+    : from = BoardPos.fromJson(json[0]),
+      to = BoardPos.fromJson(json[1]);
 }
 
 final class GameEnd extends ServerMessage {
   final bool didWin;
 
-  GameEnd.fromJson(Map<String, dynamic> json) : didWin = json["GameEnd"];
+  GameEnd.fromJson(json) : didWin = json;
 }
 
 final class ServerError extends ServerMessage {
   final String error;
 
-  ServerError.fromJson(Map<String, dynamic> json) : error = json["Error"];
+  ServerError.fromJson(json) : error = json;
 }
 
 sealed class ClientMessage {

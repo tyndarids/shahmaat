@@ -8,20 +8,22 @@ import 'protocol.dart';
 import 'board.dart';
 import 'board_pos.dart';
 
-class Playfield extends StatefulWidget {
+class StreamHandler extends StatefulWidget {
+  const StreamHandler({super.key, required this.channel});
+
   final WebSocketChannel channel;
 
-  const Playfield({super.key, required this.channel});
-
   @override
-  State<Playfield> createState() => _PlayfieldState();
+  State<StreamHandler> createState() => _StreamHandlerState();
 }
 
-class _PlayfieldState extends State<Playfield> {
-  BoardState? _board;
+class _StreamHandlerState extends State<StreamHandler> {
+  // DO NOT call setState in this widget since that will rebuild the
+  // StreamBuilder, resubscribe to the stream, and reprocess the latest data,
+  // which wrecks havoc on the game state.
 
+  BoardState? _board;
   List<BoardPos>? _validMoves;
-  BoardPos? _picked;
 
   @override
   Widget build(BuildContext context) => StreamBuilder(
@@ -38,13 +40,13 @@ class _PlayfieldState extends State<Playfield> {
             _validMoves = validMoves;
             break;
 
-          case Place(at: final placedPos):
-            if (_picked != placedPos) {
-              _board!.board[placedPos.x][placedPos.y] =
-                  _board!.board[_picked!.x][_picked!.y];
-              _board!.board[_picked!.x][_picked!.y] = null;
+          case Place(from: final from, to: final to):
+            if (_board != null) {
+              final movedPiece = _board![from];
+              _board![from] = null;
+              _board![to] = movedPiece;
             }
-            _picked = null;
+            _validMoves = null;
             break;
 
           case GameEnd(didWin: final didWin):
@@ -57,94 +59,137 @@ class _PlayfieldState extends State<Playfield> {
         }
       }
 
-      if (_picked == null) _validMoves = null;
-
       return _board != null
-          ? Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final boardLength = constraints.biggest.shortestSide;
-                  final pieceLength = constraints.biggest.shortestSide / 8;
+          ? Playfield(
+            channelTx: widget.channel.sink,
+            board: _board!,
+            validMoves: _validMoves,
+          )
+          : CircularProgressIndicator();
+    },
+  );
+}
 
-                  return SizedBox.square(
-                    dimension: boardLength,
-                    child: GridView.count(
-                      childAspectRatio: 1,
-                      physics: NeverScrollableScrollPhysics(),
-                      crossAxisCount: 8,
+class Playfield extends StatefulWidget {
+  const Playfield({
+    super.key,
+    required this.channelTx,
+    required this.board,
+    required this.validMoves,
+  });
+
+  final Sink channelTx;
+  final BoardState board;
+  final List<BoardPos>? validMoves;
+
+  @override
+  State<Playfield> createState() => _PlayfieldState();
+}
+
+class _PlayfieldState extends State<Playfield> {
+  bool _hasPicked = false;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(32),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final boardLength = constraints.biggest.shortestSide;
+          final pieceLength = boardLength / 8;
+
+          return SizedBox.square(
+            dimension: boardLength,
+            child: GridView.count(
+              childAspectRatio: 1,
+              physics: NeverScrollableScrollPhysics(),
+              crossAxisCount: 8,
+              children: [
+                for (final y in Iterable.generate(8).toList().reversed)
+                  for (final x in Iterable.generate(8))
+                    Stack(
                       children: [
-                        for (final y in Iterable.generate(8).toList().reversed)
-                          for (final x in Iterable.generate(8))
-                            Container(
-                              color:
-                                  (x + y) % 2 == 1
-                                      ? Color(0xFFFAF5F0)
-                                      : Color(0xFF262942),
-                              child:
-                                  _board!.board[y][x] != null
-                                      ? Draggable<BoardPos>(
-                                        data: BoardPos(y, x),
-                                        maxSimultaneousDrags: 1,
-                                        feedback: PieceWidget(
-                                          _board!.board[y][x]!,
-                                          pieceLength: pieceLength,
-                                        ),
-                                        childWhenDragging: Container(),
-                                        child: PieceWidget(
-                                          _board!.board[y][x]!,
-                                          pieceLength: pieceLength,
-                                        ),
-                                        onDragStarted: () async {
-                                          _picked = BoardPos(y, x);
-                                          widget.channel.sink.add(
-                                            jsonEncode(Picked(BoardPos(y, x))),
-                                          );
-                                        },
-                                        onDraggableCanceled: (_, _) {
-                                          widget.channel.sink.add(
-                                            jsonEncode(Placed(BoardPos(y, x))),
-                                          );
-                                          setState(() => _validMoves = null);
-                                        },
-                                      )
-                                      : DragTarget<BoardPos>(
-                                        builder:
-                                            (_, _, _) => Container(
-                                              color:
-                                                  _validMoves?.contains(
-                                                            BoardPos(y, x),
-                                                          ) ??
-                                                          false
-                                                      ? (x + y) % 2 == 1
-                                                          ? Color(0x20000000)
-                                                          : Color(0x20FFFFFF)
-                                                      : null,
-                                            ),
-                                        onWillAcceptWithDetails:
-                                            (details) =>
-                                                _validMoves?.contains(
-                                                  BoardPos(y, x),
-                                                ) ??
-                                                false,
-                                        onAcceptWithDetails: (details) {
-                                          widget.channel.sink.add(
-                                            jsonEncode(Placed(BoardPos(y, x))),
-                                          );
-                                          setState(() => _validMoves = null);
-                                        },
-                                      ),
-                            ),
+                        Container(
+                          color:
+                              (x + y) % 2 == 1
+                                  ? Color(0xFFFAF5F0)
+                                  : Color(0xFF262942),
+                        ),
+                        BoardTile(
+                          widget.board[BoardPos(x, y)],
+                          pieceLength: pieceLength,
+                          hasPicked: _hasPicked,
+                          isValidMove:
+                              widget.validMoves?.contains(BoardPos(x, y)) ??
+                              false,
+                          picked: () {
+                            setState(() => _hasPicked = true);
+                            widget.channelTx.add(
+                              jsonEncode(Picked(BoardPos(x, y))),
+                            );
+                          },
+                          placed: () {
+                            setState(() => _hasPicked = false);
+                            widget.channelTx.add(
+                              jsonEncode(Placed(BoardPos(x, y))),
+                            );
+                          },
+                        ),
                       ],
                     ),
-                  );
-                },
-              ),
+              ],
             ),
+          );
+        },
+      ),
+    ),
+  );
+}
+
+class BoardTile extends StatelessWidget {
+  const BoardTile(
+    this.piece, {
+    super.key,
+    required this.hasPicked,
+    required this.isValidMove,
+    required this.pieceLength,
+    required this.picked,
+    required this.placed,
+  });
+
+  final Piece? piece;
+  final bool hasPicked;
+  final bool isValidMove;
+  final double pieceLength;
+
+  final void Function() picked;
+  final void Function() placed;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    children: [
+      isValidMove
+          ? DragTarget<BoardPos>(
+            builder:
+                (_, _, _) => Container(
+                  color: isValidMove ? Color.fromARGB(65, 51, 126, 255) : null,
+                ),
+            onWillAcceptWithDetails: (_) => isValidMove,
+            onAcceptWithDetails: (_) => placed(),
           )
-          : Container();
-    },
+          : Container(),
+      piece != null
+          ? Draggable<BoardPos>(
+            data: BoardPos(0, 0), // placeholder value
+            maxSimultaneousDrags: hasPicked ? 0 : 1,
+            onDragStarted: picked,
+            onDraggableCanceled: (_, _) => placed(),
+            childWhenDragging: Container(),
+            feedback: PieceWidget(piece!, pieceLength: pieceLength),
+            child: PieceWidget(piece!, pieceLength: pieceLength),
+          )
+          : Container(),
+    ],
   );
 }
 
@@ -157,7 +202,7 @@ class PieceWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Image.asset(
     piece.assetName,
-    filterQuality: FilterQuality.none,
+    filterQuality: FilterQuality.none, // disable antialiasing for pixel art
     fit: BoxFit.contain,
     height: pieceLength,
     width: pieceLength,

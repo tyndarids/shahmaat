@@ -20,5 +20,5 @@ final class BoardPos {
   int get hashCode => (x, y).hashCode;
 
   @override
-  String toString() => "BoardPos($x, $y)";
+  String toString() => "${String.fromCharCode("A".codeUnitAt(0) + x)}${y + 1}";
 }

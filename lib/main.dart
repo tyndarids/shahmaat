@@ -76,7 +76,7 @@ class _MyHomePageState extends State<MyHomePage> {
                 )
                 : Stack(
                   children: [
-                    Playfield(channel: _channel!),
+                    StreamHandler(channel: _channel!),
                     Padding(
                       padding: const EdgeInsets.all(8),
                       child: OutlinedButton.icon(
