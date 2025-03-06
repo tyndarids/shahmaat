@@ -6,11 +6,9 @@ mod piece;
 mod protocol;
 mod valid_moves;
 
-use board::BoardState;
 use futures_util::{SinkExt as _, stream::StreamExt as _};
 use http::header::SEC_WEBSOCKET_PROTOCOL;
 use log::{debug, error, info, warn};
-use protocol::ClientMessage;
 use std::{mem::take, sync::Arc, time::Duration};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -24,6 +22,9 @@ use tokio_tungstenite::tungstenite::{
     handshake::client::Request,
     http::{HeaderValue, Response},
 };
+use tokio_util::sync::CancellationToken;
+
+use crate::{board::BoardState, protocol::ClientMessage};
 
 const PROTOCOL_VERSION: &str = "shahmaat_protocol_0.1.0";
 
@@ -37,7 +38,7 @@ macro_rules! send {
         if let Error(err) = &message {
             error!("Error: {err}");
         } else {
-            info!("Sending {:?}", &message);
+            debug!("Sending {message:?}");
         }
 
         $tx.send(Message::Text(serde_json::to_string(&message)?.into()))
@@ -45,31 +46,52 @@ macro_rules! send {
     };
 }
 
+macro_rules! close {
+    ($tx:expr, $variant:expr, $message:expr) => {
+        use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::*;
+
+        let message = tokio_tungstenite::tungstenite::Message::Close(Some(
+            tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                code: $variant,
+                reason: $message.into(),
+            },
+        ));
+
+        debug!("Sending {message:?}");
+
+        $tx.send(message).await?;
+    };
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let socket = TcpListener::bind("localhost:8080").await?;
+    let socket = TcpListener::bind("0.0.0.0:2617").await?;
     let mut tasks = JoinSet::new();
+    let cancel_token = CancellationToken::new();
     let semaphore = Arc::new(Semaphore::new(1));
 
-    info!("Listening for connections");
+    info!("Listening for connections on {:?}", socket.local_addr()?);
     loop {
         select! {
             Some(task) = tasks.join_next() => if let Err(err) = task? {
                 error!("Task errored out: {:?}", err);
             },
+
             Ok(()) = tokio::signal::ctrl_c() => {
                 eprint!("\r"); // clear the ^C in the terminal
-                info!("Shutting down {} tasks", tasks.len());
-                tasks.shutdown().await;
+                info!("Cancelling {} tasks", tasks.len());
+                cancel_token.cancel();
+                tasks.join_all().await;
                 return Ok(());
             }
+
             Ok((raw_stream, addr)) = socket.accept() => {
                 info!("Connection requested from {addr}");
                 match Arc::clone(&semaphore).try_acquire_owned() {
                     Ok(permit) => {
-                        tasks.spawn(handle_connection(permit, raw_stream));
+                        tasks.spawn(handle_connection(permit, cancel_token.clone(), raw_stream));
                     }
                     Err(TryAcquireError::NoPermits) => {
                         error!("Server reached its maximum number of simultaneous connections")
@@ -83,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn handle_connection(
     _permit: OwnedSemaphorePermit,
+    cancel_token: CancellationToken,
     raw_stream: TcpStream,
 ) -> anyhow::Result<()> {
     let stream = tokio_tungstenite::accept_hdr_async(
@@ -123,14 +146,21 @@ async fn handle_connection(
 
     loop {
         select! {
+            _ = cancel_token.cancelled() => {
+                warn!("Active connection is being aborted");
+                close!(tx, Away, "Server was shutdown");
+                break;
+            }
+
             _ = heartbeat_timer.tick() => {
                 if pings != pongs {
-                    error!("Client not responding to pings");
+                    error!("Client is not responding to pings");
+                    close!(tx, Policy, "Client failed to keep up with heartbeats");
                     break;
                 }
                 tx.send(Message::Ping(Bytes::new())).await?;
                 pings += 1;
-            },
+            }
 
             Some(message) = rx.next() => {
                 let message = message?;
@@ -144,31 +174,32 @@ async fn handle_connection(
 
                         match &message {
                             ClientMessage::Picked(pos) => {
-                                if let Some(piece) = board[*pos] {
-                                    debug!("Picked up {piece:?} at {pos:?}");
-                                    picked_piece_pos = Some(*pos);
-                                    send!(tx, ValidMoves(board.valid_moves(*pos)));
-                                } else {
+                                let Some(piece) = board[*pos] else {
                                     send!(tx, Error("No piece at picked location"));
-                                }
+                                    continue;
+                                };
+                                debug!("Picked up {piece:?} at {pos:?}");
+                                picked_piece_pos = Some(*pos);
+                                send!(tx, ValidMoves(board.valid_moves(*pos)));
                             }
 
                             ClientMessage::Placed(pos) => {
-                                if let Some(from) = picked_piece_pos {
-                                    let valid_moves = board.valid_moves(from);
-                                    if &from == pos || valid_moves.contains(pos) {
-                                        debug!("Moving from {from:?} to {pos:?}");
-                                        if let Some(piece) = take(&mut board[from]) {
-                                            board[*pos] = Some(piece);
-                                            send!(tx, Place(from, *pos));
-                                        } else {
-                                            send!(tx, Error("No piece found at picked location"));
-                                        }
-                                    } else {
-                                        send!(tx, Error("Placing in an invalid location"));
-                                    }
-                                } else {
+                                let Some(from) = picked_piece_pos else {
                                     send!(tx, Error("Trying to place without picking a piece"));
+                                    continue;
+                                };
+
+                                let valid_moves = board.valid_moves(from);
+                                if &from == pos || valid_moves.contains(pos) {
+                                    debug!("Moving from {from:?} to {pos:?}");
+                                    let Some(piece) = take(&mut board[from]) else {
+                                        send!(tx, Error("No piece found at picked location"));
+                                        continue;
+                                    };
+                                    board[*pos] = Some(piece);
+                                    send!(tx, Place(from, *pos));
+                                } else {
+                                    send!(tx, Error("Placing in an invalid location"));
                                 }
                             }
 

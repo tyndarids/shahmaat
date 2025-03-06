@@ -8,6 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'playfield.dart';
 
 const protocolVersion = "0.1.0";
+const protocol = "shahmaat_protocol_$protocolVersion";
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -59,8 +60,8 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   static WebSocketChannel _establishConnection() => IOWebSocketChannel.connect(
-    Uri.parse("ws://localhost:8080"),
-    protocols: ["shahmaat_protocol_$protocolVersion"],
+    Uri.parse("ws://localhost:2617"),
+    protocols: [protocol],
     pingInterval: Duration(seconds: 10),
   );
 
@@ -79,46 +80,58 @@ class _MyHomePageState extends State<MyHomePage> {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return CircularProgressIndicator();
           } else if (snapshot.connectionState == ConnectionState.done) {
-            return snapshot.hasError
-                ? Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Text(
-                        "${snapshot.error}",
-                        style: GoogleFonts.jetBrainsMono(),
-                      ),
+            if (_channel == null || snapshot.hasError) {
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Text(
+                      "$_channel\n${snapshot.error}",
+                      style: GoogleFonts.jetBrainsMono(),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: FilledButton.icon(
-                        icon: Icon(Icons.replay),
-                        label: Text("Try again"),
-                        onPressed: () async {
-                          _channel?.sink.close();
-                          setState(() => _channel = _establishConnection());
-                        },
-                      ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: FilledButton.icon(
+                      icon: Icon(Icons.replay),
+                      label: Text("Try again"),
+                      onPressed: () async {
+                        _channel?.sink.close();
+                        setState(() => _channel = _establishConnection());
+                      },
                     ),
-                  ],
-                )
-                : Stack(
-                  children: [
-                    StreamHandler(channel: _channel!),
-                    Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: OutlinedButton.icon(
-                        icon: Icon(Icons.close),
-                        label: Text("Close connection"),
-                        onPressed: () async {
-                          await _channel?.sink.close();
-                          setState(() => _channel = null);
-                        },
-                      ),
-                    ),
-                  ],
+                  ),
+                ],
+              );
+            } else {
+              if (_channel!.protocol == protocol) {
+                debugPrint(
+                  "Successfully negotiated a matching protocol with the server",
                 );
+              } else {
+                debugPrint(
+                  "WARNING: Protocol negotiation failed, server sent ${_channel?.protocol}",
+                );
+              }
+
+              return Stack(
+                children: [
+                  StreamHandler(channel: _channel!),
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: OutlinedButton.icon(
+                      icon: Icon(Icons.close),
+                      label: Text("Close connection"),
+                      onPressed: () async {
+                        await _channel?.sink.close();
+                        setState(() => _channel = null);
+                      },
+                    ),
+                  ),
+                ],
+              );
+            }
           } else {
             return Column(
               mainAxisAlignment: MainAxisAlignment.center,
