@@ -1,5 +1,8 @@
 import 'board.dart';
 import 'board_pos.dart';
+import 'piece.dart';
+
+/* SERVER MESSAGES */
 
 sealed class ServerMessage {
   ServerMessage();
@@ -35,10 +38,12 @@ final class ValidMoves extends ServerMessage {
 final class Place extends ServerMessage {
   final BoardPos from;
   final BoardPos to;
+  final Piece? takes;
 
-  Place.fromJson(List json)
-    : from = BoardPos.fromJson(json[0]),
-      to = BoardPos.fromJson(json[1]);
+  Place.fromJson(Map<String, dynamic> json)
+    : from = BoardPos.fromJson(json["from"]),
+      to = BoardPos.fromJson(json["to"]),
+      takes = json["takes"] != null ? Piece.fromJson(json["takes"]) : null;
 }
 
 final class GameEnd extends ServerMessage {
@@ -52,6 +57,8 @@ final class ServerError extends ServerMessage {
 
   ServerError.fromJson(json) : error = json;
 }
+
+/* CLIENT MESSAGES */
 
 sealed class ClientMessage {
   Map<String, dynamic> toJson();

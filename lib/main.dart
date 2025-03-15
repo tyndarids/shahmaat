@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -7,7 +6,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'playfield.dart';
 
-const protocolVersion = "0.1.0";
+const protocolVersion = "0.1.1";
 const protocol = "shahmaat_protocol_$protocolVersion";
 
 void main() async {
@@ -31,21 +30,19 @@ class Shahmaat extends StatelessWidget {
     home: Stack(
       children: [
         const MyHomePage(),
-        kDebugMode
-            ? Positioned(
-              bottom: 8,
-              right: 8,
-              child: Text(
-                "${packageInfo.appName} client\nversion ${packageInfo.version}\nshahmaat_protocol_$protocolVersion",
-                style: GoogleFonts.jetBrainsMono().copyWith(
-                  fontSize: 14,
-                  color: Colors.black54,
-                  decoration: TextDecoration.none,
-                ),
-                textAlign: TextAlign.right,
-              ),
-            )
-            : SizedBox.shrink(),
+        Positioned(
+          bottom: 8,
+          right: 8,
+          child: Text(
+            "${packageInfo.appName} client\nversion ${packageInfo.version}\nshahmaat_protocol_$protocolVersion",
+            style: GoogleFonts.jetBrainsMono().copyWith(
+              fontSize: 14,
+              color: Colors.black54,
+              decoration: TextDecoration.none,
+            ),
+            textAlign: TextAlign.right,
+          ),
+        ),
       ],
     ),
   );
@@ -60,7 +57,8 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   static WebSocketChannel _establishConnection() => IOWebSocketChannel.connect(
-    Uri.parse("ws://localhost:2617"),
+    // Uri.parse("ws://localhost:2617"),
+    Uri.parse("ws://192.168.0.89:2617"),
     protocols: [protocol],
     pingInterval: Duration(seconds: 10),
   );

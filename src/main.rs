@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{board::BoardState, protocol::ClientMessage};
 
-const PROTOCOL_VERSION: &str = "shahmaat_protocol_0.1.0";
+const PROTOCOL_VERSION: &str = "shahmaat_protocol_0.1.1";
 
 macro_rules! send {
     ($tx:expr, $variant:expr) => {
@@ -72,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
     let cancel_token = CancellationToken::new();
     let semaphore = Arc::new(Semaphore::new(1));
 
-    info!("Listening for connections on {:?}", socket.local_addr()?);
+    info!("Listening for connections on {}", socket.local_addr()?);
     loop {
         select! {
             Some(task) = tasks.join_next() => if let Err(err) = task? {
@@ -139,7 +139,9 @@ async fn handle_connection(
     let mut heartbeat_timer = interval(Duration::from_secs(10));
     let mut pings = 0;
     let mut pongs = 0;
+
     let mut board = BoardState::default();
+    let mut taken = Vec::new();
     let mut picked_piece_pos = None;
 
     send!(tx, Start(board));
@@ -196,8 +198,16 @@ async fn handle_connection(
                                         send!(tx, Error("No piece found at picked location"));
                                         continue;
                                     };
+                                    let takes = board[*pos];
+                                    if let Some(takes) = takes {
+                                        taken.push(takes);
+                                    }
                                     board[*pos] = Some(piece);
-                                    send!(tx, Place(from, *pos));
+                                    send!(tx, Place {
+                                        from,
+                                        to: *pos,
+                                        takes
+                                    });
                                 } else {
                                     send!(tx, Error("Placing in an invalid location"));
                                 }
@@ -206,6 +216,7 @@ async fn handle_connection(
                             ClientMessage::Error(_) => error!("{:?}", message),
                         }
                         debug!("\n{board}");
+                        debug!("Taken: {taken:?}");
                     }
 
                     Message::Close(_) => {

@@ -24,6 +24,7 @@ class _StreamHandlerState extends State<StreamHandler> {
 
   BoardState? _board;
   List<BoardPos>? _validMoves;
+  List<Piece> taken = [];
 
   @override
   Widget build(BuildContext context) => StreamBuilder(
@@ -44,6 +45,7 @@ class _StreamHandlerState extends State<StreamHandler> {
             if (_board != null) {
               final movedPiece = _board![from];
               _board![from] = null;
+              if (_board![to] != null) taken.add(_board![to]!);
               _board![to] = movedPiece;
             }
             _validMoves = null;
@@ -168,16 +170,6 @@ class BoardTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Stack(
     children: [
-      isValidMove
-          ? DragTarget<BoardPos>(
-            builder:
-                (_, _, _) => Container(
-                  color: isValidMove ? Color.fromARGB(65, 51, 126, 255) : null,
-                ),
-            onWillAcceptWithDetails: (_) => isValidMove,
-            onAcceptWithDetails: (_) => placed(),
-          )
-          : Container(),
       piece != null
           ? Draggable<BoardPos>(
             data: BoardPos(0, 0), // placeholder value
@@ -187,6 +179,21 @@ class BoardTile extends StatelessWidget {
             childWhenDragging: Container(),
             feedback: PieceWidget(piece!, pieceLength: pieceLength),
             child: PieceWidget(piece!, pieceLength: pieceLength),
+          )
+          : Container(),
+      isValidMove
+          ? DragTarget<BoardPos>(
+            builder:
+                (_, _, _) => Image.asset(
+                  "assets/valid_move.png",
+                  // disable antialiasing for pixel art
+                  filterQuality: FilterQuality.none,
+                  fit: BoxFit.contain,
+                  height: pieceLength,
+                  width: pieceLength,
+                ),
+            onWillAcceptWithDetails: (_) => isValidMove,
+            onAcceptWithDetails: (_) => placed(),
           )
           : Container(),
     ],

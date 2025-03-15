@@ -29,20 +29,20 @@ impl std::fmt::Display for Piece {
             "{}",
             match player {
                 Black => match _type {
-                    King => "♔",
-                    Queen => "♕",
-                    Rook => "♖",
-                    Bishop => "♗",
-                    Knight => "♘",
-                    Pawn => "♙",
+                    King => '♔',
+                    Queen => '♕',
+                    Rook => '♖',
+                    Bishop => '♗',
+                    Knight => '♘',
+                    Pawn => '♙',
                 },
                 White => match _type {
-                    King => "♚",
-                    Queen => "♛",
-                    Rook => "♜",
-                    Bishop => "♝",
-                    Knight => "♞",
-                    Pawn => "♟",
+                    King => '♚',
+                    Queen => '♛',
+                    Rook => '♜',
+                    Bishop => '♝',
+                    Knight => '♞',
+                    Pawn => '♟',
                 },
             }
         )
